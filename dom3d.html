@@ -598,19 +598,31 @@ function cyl(r, h, seg, color, x, y, z, rot) {
   e.position.copy(m.position); e.rotation.copy(m.rotation);
   CUR.add(e); edgeLines.push(e);
 }
-function numberDecal(num, x, y, z, flip) {
-  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+// czarny "tribal" na bok auta (410 × 50 cm); flip – lewa strona, żeby płomienie szły do tyłu
+function tribalDecal(x, y, z, flip) {
+  const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 128;
   const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#111'; ctx.font = 'bold 70px system-ui, sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(num, 64, 68);
+  if (flip) { ctx.translate(1024, 0); ctx.scale(-1, 1); }      // przód rysunku = przód auta (+u)
+  ctx.fillStyle = '#141414';
+  ctx.beginPath(); ctx.moveTo(8, 42);                           // grzbiet
+  ctx.quadraticCurveTo(500, 20, 1016, 28);
+  ctx.quadraticCurveTo(520, 54, 8, 42); ctx.fill();
+  const blade = (bx, by, tx, ty, w) => {                        // kolec od grzbietu do ostrego końca z tyłu
+    ctx.beginPath(); ctx.moveTo(bx + w, by);
+    ctx.quadraticCurveTo(bx + w * 0.5, ty, tx, ty);
+    ctx.quadraticCurveTo(bx + w * 0.1 - 10, by - (by - ty) * 0.35, bx, by);
+    ctx.closePath(); ctx.fill();
+  };
+  [[140, 6], [320, 2], [500, 4], [680, 2], [860, 8]].forEach(([u, ty]) => blade(u, 34, u - 75, ty, 85));
+  [330, 450, 570].forEach(u => blade(u, 44, u - 85, 118, 72)); // dolne kolce tylko na drzwiach
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(48, 48),
-    new THREE.MeshLambertMaterial({ map: tex, transparent: true, polygonOffset: true, polygonOffsetFactor: -2 }));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(410, 50),
+    new THREE.MeshLambertMaterial({ map: tex, transparent: true, alphaTest: 0.5,
+                                    polygonOffset: true, polygonOffsetFactor: -2 }));
   m.position.set(x, y, z); if (flip) m.rotation.y = Math.PI;
   CUR.add(m);
 }
-function raceCar(x0, z0, { color, stripe, num }) {
+function raceCar(x0, z0, { color, stripe, tribal }) {
   const W = 190, z1 = z0 + W, zc = z0 + W / 2;
   const ext = (poly, za, zb, col) => solid(poly, (u, v) => [x0 + u, v, za], (u, v) => [x0 + u, v, zb], col);
   const arch = (cx) => { const pts = [[cx - 42, 16], [cx - 42, 30]];
@@ -649,13 +661,14 @@ function raceCar(x0, z0, { color, stripe, num }) {
     cyl(34, 30, 24, M.tire, x0 + x, 34, z, [Math.PI / 2, 0, 0]);
     cyl(22, 32, 12, M.rim, x0 + x, 34, z, [Math.PI / 2, 0, 0]);
   }
-  // numery startowe na drzwiach
-  numberDecal(num, x0 + 205, 58, z0 - 0.5, true);
-  numberDecal(num, x0 + 205, 58, z1 + 0.5, false);
+  if (tribal) {                                                  // tribale na bokach
+    tribalDecal(x0 + 235, 69, z0 - 0.5, true);
+    tribalDecal(x0 + 235, 69, z1 + 0.5, false);
+  }
 }
 
 // --- sportowe sedan-coupé w stylu Skyline R34 GT-R (bez logo), przód w stronę +x ---
-function skylineCar(x0, z0, { color, num }) {
+function skylineCar(x0, z0, { color, stripe }) {
   const W = 180, z1 = z0 + W, zc = z0 + W / 2;
   const ext = (poly, za, zb, col) => solid(poly, (u, v) => [x0 + u, v, za], (u, v) => [x0 + u, v, zb], col);
   const arch = (cx) => { const pts = [[cx - 42, 16], [cx - 42, 30]];
@@ -669,6 +682,19 @@ function skylineCar(x0, z0, { color, num }) {
   ext(body, z0, z1, color);
   ext(cabin, z0 + 22, z1 - 22, M.carGlass);
   ext(roof, z0 + 20, z1 - 20, color);
+  if (stripe) {
+    // dwa pasy przez maskę, dach i bagażnik
+    const up = p => [p[0] < 231 ? p[0] - 1 : p[0] + 1, p[1] > 40 ? p[1] + 1 : p[1]];
+    for (const [a, b] of [[zc - 22, zc - 8], [zc + 8, zc + 22]]) {
+      ext(body.map(up), a, b, stripe);
+      ext(roof.map(p => [p[0], p[1] + 1]), a, b, stripe);
+    }
+    // dwa cienkie paski wzdłuż boków, nad nadkolami
+    for (const [y0, y1] of [[76, 81], [84, 86]]) {
+      box(x0 + 8, x0 + 446, y0, y1, z0 - 0.8, z0 + 1, stripe);
+      box(x0 + 8, x0 + 446, y0, y1, z1 - 1, z1 + 0.8, stripe);
+    }
+  }
   // skrzydło na klapie bagażnika
   box(x0 + 12, x0 + 20, 97, 118, z0 + 30, z0 + 36, M.carbon);
   box(x0 + 12, x0 + 20, 97, 118, z1 - 36, z1 - 30, M.carbon);
@@ -690,14 +716,12 @@ function skylineCar(x0, z0, { color, num }) {
     cyl(34, 30, 24, M.tire, x0 + x, 34, z, [Math.PI / 2, 0, 0]);
     cyl(22, 32, 12, M.rim, x0 + x, 34, z, [Math.PI / 2, 0, 0]);
   }
-  numberDecal(num, x0 + 220, 60, z0 - 0.5, true);
-  numberDecal(num, x0 + 220, 60, z1 + 0.5, false);
 }
 
 // ---------------- meble parteru ----------------
 CUR = gfFurn;
-raceCar(140, 95,      { color: 0xe8609f, num: '7' });   // garaż – różowe coupé
-skylineCar(140, 380,  { color: 0x1f5fbf, num: '23' });  // niebieskie w stylu Skyline
+raceCar(140, 95,      { color: 0xe8609f, tribal: true });      // garaż – różowe coupé z tribalami
+skylineCar(140, 380,  { color: 0x1f5fbf, stripe: 0xf4f4f4 });  // niebieskie w stylu Skyline, białe pasy
 box(715, 980, 0, 200, 45, 95, M.cab);             // 1/10 – regały
 box(925, 985, 0, 180, 300, 360, M.appl);          // 1/10 – kocioł
 box(930, 990, 0, 85, 400, 460, M.appl);           // 1/08 – pralka i suszarka

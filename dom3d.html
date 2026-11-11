@@ -314,14 +314,14 @@ win(F.B, 852, 1002, 306, 526);
 
 // --- elewacja od ogrodu (SW, oś 6) ---
 win(F.S6, 420, 700, 90, 230);                   // okno kuchni
-win(F.S6, 791, 979, 0, 230);                    // drzwi tarasowe 380×230
-win(F.S6, 983, 1171, 0, 230);
+win(F.S6, 840, 1014, 0, 230);                   // drzwi tarasowe – w osi przeszklenia szczytu
+win(F.S6, 1014, 1188, 0, 230);
 onFace(F.S6, 1217, 1700, 0, 230, C.wood, 3);    // okładzina drewniana
 solid([[840, 310], [1188, 310], [1188, 450], [1014, 596], [840, 450]],   // przeszklenie w szczycie
       (u, v) => [u, v, 1230], (u, v) => [u, v, 1235], C.glass);
 box(840, 1188, 440, 450, 1230, 1238, C.frame);
 box(840, 1188, 310, 320, 1230, 1238, C.frame);
-box(1009, 1019, 310, 596, 1230, 1238, C.frame);
+box(1007, 1021, 310, 596, 1230, 1238, C.frame);
 
 // --- elewacja SE (G) ---
 onFace(F.G, 370, 1230, 0, 230, C.wood, 3);      // okładzina drewniana pod pergolą
@@ -352,7 +352,7 @@ box(1700, 2070, 248, 268, 1216, 1230, C.wood, pergola);
 for (let z = 430; z < 1200; z += 60) box(1700, 2050, 252, 266, z, z + 6, C.wood, pergola);
 // opisy stron i kompas
 for (const [t, x, z] of [['NW · wjazd', -420, 320], ['SW · ogród', 900, 1750], ['SE', 2350, 800], ['NE', 900, -450]]) {
-  const s = textSprite(t); s.position.set(x, 60, z); siteLabels.add(s);
+  const s = textSprite(t); s.material.depthTest = true; s.position.set(x, 60, z); siteLabels.add(s);
 }
 const compass = new THREE.Group();
 const cone = new THREE.Mesh(new THREE.ConeGeometry(40, 120, 3), mat(0xb03a2e));
@@ -426,7 +426,7 @@ wall('z', 0, 40, 0, 640, 0, HS, [[70, 570, 0, 225, 'panel', C.door]], C.wall);  
 wall('z', 992, 1032, 0, 410, 0, H0, [], C.wall);                                           // skrzydło od SE
 wall('x', 370, 410, 992, 1700, 0, H0, [[1370, 1450, 20, 230, 'win']], C.wall);             // oś 2
 wall('z', 1660, 1700, 370, 1230, 0, H0, [[508, 728, 0, 230, 'win'], [846, 1146, 0, 230, 'win']], C.wall); // G
-wall('x', 1190, 1230, 380, 1700, 0, H0, [[420, 700, 90, 230, 'win'], [791, 1171, 0, 230, 'win']], C.wall); // oś 6
+wall('x', 1190, 1230, 380, 1700, 0, H0, [[420, 700, 90, 230, 'win'], [840, 1188, 0, 230, 'win']], C.wall); // oś 6
 wall('z', 380, 420, 618, 1230, 0, H0, [[728, 833, 0, 210, 'panel', C.frame], [1000, 1160, 90, 230, 'win']], C.wall); // B – wejście
 wall('x', 618, 640, 0, 695, 0, (x) => stripH(x), [[430, 510, 0, 200, 'door']]);          // garaż | wejście, wiatrołap
 // ściany działowe
@@ -524,7 +524,8 @@ roomLabel(afLabels, 'Taras', 190, 350, 520);
 const gfFurn = new THREE.Group(), afFurn = new THREE.Group();
 root.add(gfFurn, afFurn);
 const M = { wood: 0xb48c5e, dark: 0x6b6f73, linen: 0xefebe3, fabric: 0x8a96a3, cab: 0xe3e1dc,
-            top: 0x5d5f62, appl: 0xd5d8db, white: 0xfbfbfb, car: 0x7f93a8, carTop: 0x55606b,
+            top: 0x5d5f62, appl: 0xd5d8db, white: 0xfbfbfb, tire: 0x1e1f21, rim: 0xc9ccd0,
+            carGlass: 0x2b3238, carbon: 0x26282b, tail: 0xa31b1b, lamp: 0xf3f0d8,
             tv: 0x2e3033, rug: 0xc9b9a0, water: 0xd3e4ec };
 
 function legs4(x0, x1, z0, z1, y0, y1, t = 5) {
@@ -587,17 +588,76 @@ function shower(x0, x1, z0, z1, y, glass) {
   }
 }
 function counter(x0, x1, z0, z1, y) { box(x0, x1, y, y + 86, z0, z1, M.cab); box(x0, x1, y + 86, y + 90, z0, z1, M.top); }
-function car(x0, x1, z0, z1) {
-  box(x0, x1, 22, 95, z0, z1, M.car);
-  box(x0 + 110, x1 - 90, 95, 145, z0 + 12, z1 - 12, M.carTop);
-  for (const wx of [x0 + 50, x1 - 120]) for (const wz of [[z0 - 2, z0 + 24], [z1 - 24, z1 + 2]])
-    box(wx, wx + 70, 0, 62, wz[0], wz[1], M.tv);
+// --- wyścigowe coupé (sylwetka w stylu 911 GT3 RS, bez logo), przód w stronę +x ---
+function cyl(r, h, seg, color, x, y, z, rot) {
+  const g = new THREE.CylinderGeometry(r, r, h, seg);
+  const m = new THREE.Mesh(g, mat(color));
+  m.position.set(x, y, z); m.rotation.set(...rot);
+  CUR.add(m);
+  const e = new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), edgeMat);
+  e.position.copy(m.position); e.rotation.copy(m.rotation);
+  CUR.add(e); edgeLines.push(e);
+}
+function numberDecal(num, x, y, z, flip) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#111'; ctx.font = 'bold 70px system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(num, 64, 68);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(48, 48),
+    new THREE.MeshLambertMaterial({ map: tex, transparent: true, polygonOffset: true, polygonOffsetFactor: -2 }));
+  m.position.set(x, y, z); if (flip) m.rotation.y = Math.PI;
+  CUR.add(m);
+}
+function raceCar(x0, z0, { color, stripe, num }) {
+  const W = 190, z1 = z0 + W, zc = z0 + W / 2;
+  const ext = (poly, za, zb, col) => solid(poly, (u, v) => [x0 + u, v, za], (u, v) => [x0 + u, v, zb], col);
+  const arch = (cx) => { const pts = [[cx - 42, 16], [cx - 42, 30]];
+    for (let a = 160; a >= 20; a -= 20) pts.push([cx + 42 * Math.cos(a * Math.PI / 180), 30 + 42 * Math.sin(a * Math.PI / 180)]);
+    return [...pts, [cx + 42, 30], [cx + 42, 16]]; };
+  const RW = 80, FW = 325;                                       // osie kół (rozstaw 245 cm)
+  const body = [[0, 22], [20, 16], ...arch(RW), ...arch(FW), [445, 16], [457, 32], [457, 60],
+                [440, 76], [400, 86], [332, 96], [12, 92], [0, 80]];
+  const cabin = [[62, 92], [332, 96], [287, 127], [240, 130], [168, 119]];
+  const roof  = [[166, 118], [240, 129], [289, 126], [289, 128.5], [240, 132], [166, 121]];
+  ext(body, z0, z1, color);
+  ext(cabin, z0 + 26, z1 - 26, M.carGlass);
+  ext(roof, z0 + 24, z1 - 24, color);
+  if (stripe) {                                                  // dwa pasy przez maskę, dach i tył
+    const up = p => [p[0] < 228 ? p[0] - 1 : p[0] + 1, p[1] > 40 ? p[1] + 1 : p[1]];
+    for (const [a, b] of [[zc - 22, zc - 8], [zc + 8, zc + 22]]) {
+      ext(body.map(up), a, b, stripe);
+      ext(roof.map(p => [p[0], p[1] + 1]), a, b, stripe);
+    }
+  }
+  // tylne skrzydło na wspornikach
+  box(x0 + 26, x0 + 34, 90, 126, zc - 46, zc - 40, M.carbon);
+  box(x0 + 26, x0 + 34, 90, 126, zc + 40, zc + 46, M.carbon);
+  ext([[-10, 124], [48, 126], [48, 130], [-6, 131]], z0 + 6, z1 - 6, M.carbon);
+  box(x0 - 12, x0 + 50, 110, 136, z0 + 3, z0 + 6, M.carbon);
+  box(x0 - 12, x0 + 50, 110, 136, z1 - 6, z1 - 3, M.carbon);
+  // splitter, dyfuzor, światła, lusterka
+  box(x0 + 440, x0 + 468, 12, 16, z0 + 6, z1 - 6, M.carbon);
+  box(x0 - 4, x0 + 30, 14, 24, z0 + 22, z1 - 22, M.carbon);
+  box(x0 - 1, x0 + 1, 72, 77, z0 + 16, z1 - 16, M.tail);
+  for (const z of [z0 + 32, z1 - 32]) cyl(10, 6, 16, M.lamp, x0 + 436, 79, z, [0, 0, -65 * Math.PI / 180]);
+  box(x0 + 300, x0 + 316, 98, 107, z0 - 7, z0 + 2, color);
+  box(x0 + 300, x0 + 316, 98, 107, z1 - 2, z1 + 7, color);
+  // koła: opona + felga
+  for (const x of [RW, FW]) for (const z of [z0 + 17, z1 - 17]) {
+    cyl(34, 30, 24, M.tire, x0 + x, 34, z, [Math.PI / 2, 0, 0]);
+    cyl(22, 32, 12, M.rim, x0 + x, 34, z, [Math.PI / 2, 0, 0]);
+  }
+  // numery startowe na drzwiach
+  numberDecal(num, x0 + 205, 58, z0 - 0.5, true);
+  numberDecal(num, x0 + 205, 58, z1 + 0.5, false);
 }
 
 // ---------------- meble parteru ----------------
 CUR = gfFurn;
-car(110, 560, 100, 280);                          // garaż
-car(110, 560, 370, 550);
+raceCar(140, 95,  { color: 0xc8102e, num: '7' });                     // garaż – czerwone coupé
+raceCar(140, 375, { color: 0xf1f1ef, stripe: 0x1f4fa3, num: '23' });  // białe z niebieskimi pasami
 box(715, 980, 0, 200, 45, 95, M.cab);             // 1/10 – regały
 box(925, 985, 0, 180, 300, 360, M.appl);          // 1/10 – kocioł
 box(930, 990, 0, 85, 400, 460, M.appl);           // 1/08 – pralka i suszarka

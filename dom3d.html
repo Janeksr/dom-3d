@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dom – model 3D</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe9f2; font-family: system-ui, sans-serif; }
+  #ui { position: absolute; top: 12px; left: 12px; background: rgba(255,255,255,.93); padding: 10px 12px;
+        border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.18); max-width: 280px; font-size: 13px; color: #222; }
+  #ui h1 { font-size: 15px; margin: 0 0 6px; }
+  #ui .grp { margin-top: 7px; }
+  #ui .cap { font-size: 11px; color: #666; margin-bottom: 2px; }
+  #ui button { margin: 2px 2px 2px 0; padding: 4px 8px; font-size: 12px; border: 1px solid #bbb;
+               background: #f7f7f7; border-radius: 4px; cursor: pointer; }
+  #ui button:hover { background: #e6edf4; }
+  #ui button.on { background: #2f6db3; border-color: #2f6db3; color: #fff; }
+  #ui label { display: inline-block; margin-right: 10px; cursor: pointer; }
+  #ui .hint { color: #666; font-size: 11px; margin-top: 8px; line-height: 1.45; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="ui">
+  <h1>Dom – model 3D</h1>
+  <div class="grp"><div class="cap">Co pokazać</div><div id="modes"></div></div>
+  <div class="grp"><div class="cap">Widok</div><div id="views"></div></div>
+  <div class="grp">
+    <label><input type="checkbox" id="tPergola" checked> pergola</label>
+    <label><input type="checkbox" id="tEdges" checked> krawędzie</label>
+    <label><input type="checkbox" id="tLabels" checked> opisy</label>
+    <label><input type="checkbox" id="tFurn" checked> meble</label>
+  </div>
+  <div class="hint">
+    Lewy przycisk – obrót · prawy – przesuwanie · kółko – przybliżenie.<br>
+    Model uproszczony, odtworzony ze zdjęć rzutów, elewacji i przekrojów (skala 1:100) – dokładność rzędu kilkudziesięciu cm.
+    Ściany poddasza ucięte na wysokości sufitu (+5,74). Meble widać w trybach „Parter” i „Poddasze”.
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------------------------------------------------------------------------
+// Układ współrzędnych modelu (w centymetrach, jak na rysunkach):
+//   X – oś literowa A→G   (0 = lico ściany A, 1700 = lico ściany G)
+//   Z – oś liczbowa 1→6   (0 = lico ściany przy osi 1, 1230 = lico przy osi 6)
+//   Y – wysokość, 0 = ±0.00 (posadzka parteru), strop +2.72…+3.06, sufit poddasza +5.74
+// Strony świata wg elewacji: A = NW (wjazd), oś 6 = SW (ogród), G = SE, oś 1 = NE.
+// ---------------------------------------------------------------------------
+
+const C = {
+  wall:   0xf3f1ec,  // tynk – odcienie bieli
+  iwall:  0xf6f4f0,  // ściany wewnętrzne
+  grey:   0xa8a9a6,  // tynk – odcienie szarości
+  wood:   0xa4723f,  // okładzina drewniana
+  stair:  0xc29a66,
+  roof:   0x5a5e63,  // blachodachówka – szara
+  frame:  0x4b4e53,  // stolarka – szara
+  glass:  0x7b93a3,
+  door:   0xc6c8ca,  // brama garażowa
+  chimney:0x8a8d91,
+  paving: 0xc9c5bb,
+  floor:  0xdcccae,
+  slab:   0xd6d3cc,
+  tile:   0xc9d6dc,
+  garage: 0xb9b9b5,
+  ground: 0xa9c48f,
+  rail:   0xbfd3dc,
+};
+
+// --- scena ---------------------------------------------------------------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xdfe9f2);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.5, 500);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+controls.minDistance = 3;
+controls.maxDistance = 90;
+
+scene.add(new THREE.AmbientLight(0xffffff, 1.3));
+const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+sun.position.set(-20, 30, 25);
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+fill.position.set(20, 10, -25);
+scene.add(fill);
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.MeshLambertMaterial({ color: C.ground }));
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.02;
+scene.add(ground);
+
+const root = new THREE.Group();          // cały model w cm
+root.scale.setScalar(0.01);
+root.position.set(-8.5, 0, -6.15);
+scene.add(root);
+const ext  = new THREE.Group();  // bryła z zewnątrz
+const site = new THREE.Group();  // otoczenie (podjazd, pergola, kompas)
+const gf   = new THREE.Group();  // parter – wnętrze
+const af   = new THREE.Group();  // poddasze – wnętrze
+root.add(ext, site, gf, af);
+const pergola = new THREE.Group(); site.add(pergola);
+const siteLabels = new THREE.Group(); site.add(siteLabels);
+const gfLabels = new THREE.Group(); root.add(gfLabels);
+const afLabels = new THREE.Group(); root.add(afLabels);
+let CUR = ext;                   // grupa, do której trafiają nowe elementy
+
+// --- pomocnicze ----------------------------------------------------------
+const edgeLines = [];
+const edgeMat = new THREE.LineBasicMaterial({ color: 0x2b2b2b, transparent: true, opacity: 0.45 });
+const matCache = {};
+function mat(color, opacity = 1) {
+  const key = color + '_' + opacity;
+  if (!matCache[key]) {
+    matCache[key] = new THREE.MeshLambertMaterial({
+      color, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+      transparent: opacity < 1, opacity, depthWrite: opacity >= 1,
+    });
+  }
+  return matCache[key];
+}
+
+// Bryła z wielokąta 2D (opcjonalnie z otworami): mapA/mapB zamieniają punkt (u,v) na dwa końce "wyciągnięcia".
+function solid(poly, mapA, mapB, color, parent = CUR, opacity = 1, holes = []) {
+  const loops = [poly, ...holes];
+  const flat = loops.flat();
+  const tris = THREE.ShapeUtils.triangulateShape(
+    poly.map(p => new THREE.Vector2(p[0], p[1])),
+    holes.map(h => h.map(p => new THREE.Vector2(p[0], p[1]))));
+  const A = flat.map(p => mapA(p[0], p[1]));
+  const B = flat.map(p => mapB(p[0], p[1]));
+  const pos = [];
+  const push = (...vs) => vs.forEach(v => pos.push(v[0], v[1], v[2]));
+  for (const t of tris) { push(A[t[0]], A[t[1]], A[t[2]]); push(B[t[0]], B[t[2]], B[t[1]]); }
+  let off = 0;
+  for (const loop of loops) {
+    for (let i = 0; i < loop.length; i++) {
+      const a = off + i, b = off + (i + 1) % loop.length;
+      push(A[a], B[a], B[b]); push(A[a], B[b], A[b]);
+    }
+    off += loop.length;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, mat(color, opacity));
+  parent.add(m);
+  const e = new THREE.LineSegments(new THREE.EdgesGeometry(g, 15), edgeMat);
+  parent.add(e); edgeLines.push(e);
+  return m;
+}
+
+function box(x0, x1, y0, y1, z0, z1, color, parent = CUR, opacity = 1) {
+  return solid([[x0, z0], [x1, z0], [x1, z1], [x0, z1]],
+               (u, v) => [u, y0, v], (u, v) => [u, y1, v], color, parent, opacity);
+}
+
+// Ściany zewnętrzne: oś, położenie lica, kierunek "na zewnątrz"
+const F = {
+  A:  { axis: 'x', at: 0,    out: -1 },  // elewacja NW (wjazd)
+  B:  { axis: 'x', at: 380,  out: -1 },  // lico bryły głównej od strony tarasu/wejścia
+  G:  { axis: 'x', at: 1700, out:  1 },  // elewacja SE
+  S6: { axis: 'z', at: 1230, out:  1 },  // elewacja SW (ogród)
+  N1: { axis: 'z', at: 0,    out: -1 },  // elewacja NE – szczyt skrzydła garażowego
+  N2: { axis: 'z', at: 370,  out: -1 },  // ściana bryły głównej od NE
+  W:  { axis: 'x', at: 1032, out:  1 },  // ściana szczytowa skrzydła od SE
+};
+function onFace(f, a0, a1, y0, y1, color, d = 4, off = 0) {
+  const p0 = f.at + f.out * off, p1 = f.at + f.out * (off + d);
+  const lo = Math.min(p0, p1), hi = Math.max(p0, p1);
+  return f.axis === 'x' ? box(lo, hi, y0, y1, a0, a1, color) : box(a0, a1, y0, y1, lo, hi, color);
+}
+function win(f, a0, a1, y0, y1, off = 0) {
+  onFace(f, a0, a1, y0, y1, C.frame, 4, off);
+  onFace(f, a0 + 7, a1 - 7, y0 + 7, y1 - 7, C.glass, 5, off);
+}
+
+function textSprite(text, w = 340) {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  ctx.beginPath(); ctx.roundRect(4, 14, 504, 100, 18); ctx.fill();
+  ctx.fillStyle = '#222'; ctx.font = 'bold 46px system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 256, 66);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+  s.renderOrder = 10;
+  s.scale.set(w, w / 4, 1);
+  return s;
+}
+
+// --- dachy (kąt 40°) -----------------------------------------------------
+const K = Math.tan(40 * Math.PI / 180);
+const RT = 22;                                     // grubość połaci
+const hN = (x, z) => 806 - K * (800 - z);          // dach główny, połać od NE (oś 2)
+const hS = (x, z) => 806 - K * (z - 800);          // dach główny, połać od SW (oś 6)
+const hW = (x, z) => 723 - K * Math.abs(x - 706);  // skrzydło garażowe, kalenica +7.23
+const hX = (x, z) => 649 - K * Math.abs(x - 1014); // szczyt od ogrodu, kalenica +6.49
+function roofTop(x, z) {                           // wierzch dachu nad punktem (x,z)
+  let h = -1e9;
+  if (x >= 320 && x <= 1760 && z >= 310 && z <= 1290) h = Math.max(h, 806 - K * Math.abs(z - 800));
+  if (x >= 320 && x <= 1092 && z >= -60 && z <= 800)  h = Math.max(h, hW(x, z));
+  if (x >= 762 && x <= 1266 && z >= 987 && z <= 1260) h = Math.max(h, hX(x, z));
+  return h;
+}
+const CEIL = 574;                                  // sufit poddasza
+const atticTop = (x, z) => Math.min(CEIL, roofTop(x, z) - 40);
+
+// =========================================================================
+//  BRYŁA Z ZEWNĄTRZ
+// =========================================================================
+CUR = ext;
+function roof(poly, h) {
+  solid(poly, (u, v) => [u, h(u, v), v], (u, v) => [u, h(u, v) - RT, v], C.roof);
+}
+
+// bryła główna: B–G (1320) × osie 2–6 (860), dwuspadowy, szczyty od A i G
+solid([[370, 0], [1230, 0], [1230, hN(0, 370) - 20], [800, 786], [370, hN(0, 370) - 20]],
+      (u, v) => [380, v, u], (u, v) => [1700, v, u], C.wall);
+// skrzydło nad garażem/pom. gosp.: B–E (652) × osie 1–2 (370), szczyt od osi 1
+solid([[380, 0], [1032, 0], [1032, hW(1032) - 20], [706, 703], [380, hW(380) - 20]],
+      (u, v) => [u, v, 0], (u, v) => [u, v, 371], C.wall);
+// mały szczyt od ogrodu (kalenica +6.49)
+solid([[782, 300], [1246, 300], [1246, hX(1246) - 20], [1014, 629], [782, hX(782) - 20]],
+      (u, v) => [u, v, 1000], (u, v) => [u, v, 1229], C.wall);
+
+// dach główny (okap 60 cm)
+roof([[320, 310], [1760, 310], [1760, 800], [320, 800]], hN);
+roof([[320, 800], [1760, 800], [1760, 1290], [1266, 1290], [1266, 1239],
+      [1014, 987], [762, 1239], [762, 1290], [320, 1290]], hS);
+// dach skrzydła – kosze schodzą do połaci głównej
+roof([[320, -60], [706, -60], [706, 701], [320, 315]], hW);
+roof([[706, -60], [1092, -60], [1092, 315], [706, 701]], hW);
+// dach małego szczytu
+roof([[762, 1260], [762, 1239], [1014, 987], [1014, 1260]], hX);
+roof([[1014, 987], [1266, 1239], [1266, 1260], [1014, 1260]], hX);
+
+// kominy [x, z, szer. x, szer. z, wysokość]
+const CHIMNEYS = [[941, 610, 70, 54, 826], [660, 790, 56, 62, 856], [1652, 710, 62, 50, 836]];
+for (const [x, z, w, d, top] of CHIMNEYS) {
+  box(x - w / 2, x + w / 2, 500, top - 8, z - d / 2, z + d / 2, C.chimney);
+  box(x - w / 2 - 5, x + w / 2 + 5, top - 8, top, z - d / 2 - 5, z + d / 2 + 5, C.chimney);
+}
+
+// okna dachowe 78×140
+function skylight(x, d, side) {
+  const z = side === 'N' ? 800 - d : 800 + d;
+  const h = side === 'N' ? hN(x, z) : hS(x, z);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(78, 10, 140), mat(C.frame));
+  m.position.set(x, h + 4, z);
+  m.rotation.x = side === 'N' ? -40 * Math.PI / 180 : 40 * Math.PI / 180;
+  CUR.add(m);
+  const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), edgeMat);
+  e.position.copy(m.position); e.rotation.copy(m.rotation);
+  CUR.add(e); edgeLines.push(e);
+}
+skylight(1120, 340, 'N'); skylight(1330, 340, 'N');
+skylight(690, 340, 'S');  skylight(1330, 340, 'S');
+
+// lamele drewniane przy wejściu (wspólne dla widoku zewnętrznego i parteru)
+function lamellas() {
+  for (let z = 646; z < 1056; z += 20) if (z < 705 || z > 855) box(0, 12, 2, 230, z, z + 6, C.wood);
+  for (let x = 14; x < 375; x += 20) box(x, x + 6, 2, 230, 1048, 1060, C.wood);
+}
+
+// --- część parterowa od strony A: garaż + zadaszone wejście, na górze taras ---
+box(0, 379, 0, 230, 0, 640, C.grey);            // garaż (tynk szary)
+box(0, 379, 230, 316, 0, 1060, C.wall);         // strop/attyka tarasu
+box(0, 379, 0, 2, 640, 1060, C.paving);         // posadzka wejścia
+box(0, 4, 316, 412, 0, 1060, C.rail, CUR, 0.5); // balustrada szklana tarasu na dachu
+box(0, 379, 316, 412, 0, 4, C.rail, CUR, 0.5);
+box(0, 379, 316, 412, 1056, 1060, C.rail, CUR, 0.5);
+onFace(F.A, 70, 570, 0, 225, C.door, 5);        // brama garażowa 500×225
+for (const y of [56, 112, 168]) onFace(F.A, 72, 568, y - 1, y + 1, C.frame, 6);
+lamellas();
+
+// --- elewacja od A (NW) – lico bryły głównej ---
+onFace(F.B, 640, 1060, 0, 230, C.wood, 3);      // okładzina drewniana przy wejściu
+onFace(F.B, 728, 833, 0, 210, C.frame, 4, 3);   // drzwi wejściowe 105×210
+onFace(F.B, 790, 805, 20, 190, C.glass, 5, 3);
+win(F.B, 1000, 1160, 90, 230);                  // okno kuchni
+win(F.B, 535, 685, 306, 526);                   // drzwi balkonowe poddasza na taras
+win(F.B, 852, 1002, 306, 526);
+
+// --- elewacja od ogrodu (SW, oś 6) ---
+win(F.S6, 420, 700, 90, 230);                   // okno kuchni
+win(F.S6, 791, 979, 0, 230);                    // drzwi tarasowe 380×230
+win(F.S6, 983, 1171, 0, 230);
+onFace(F.S6, 1217, 1700, 0, 230, C.wood, 3);    // okładzina drewniana
+solid([[840, 310], [1188, 310], [1188, 450], [1014, 596], [840, 450]],   // przeszklenie w szczycie
+      (u, v) => [u, v, 1230], (u, v) => [u, v, 1235], C.glass);
+box(840, 1188, 440, 450, 1230, 1238, C.frame);
+box(840, 1188, 310, 320, 1230, 1238, C.frame);
+box(1009, 1019, 310, 596, 1230, 1238, C.frame);
+
+// --- elewacja SE (G) ---
+onFace(F.G, 370, 1230, 0, 230, C.wood, 3);      // okładzina drewniana pod pergolą
+win(F.G, 846, 1146, 0, 230, 3);                 // drzwi tarasowe salonu 300×230
+win(F.G, 508, 728, 0, 230, 3);                  // drzwi tarasowe pokoju 220×230
+win(F.G, 896, 1040, 306, 536);                  // okna poddasza
+win(F.G, 790, 884, 306, 536);
+onFace(F.G, 684, 790, 306, 536, C.grey, 3);
+win(F.G, 590, 680, 306, 536);
+onFace(F.W, 0, 370, 0, 230, C.grey, 2);         // ściana skrzydła – tynk szary
+
+// --- elewacja NE (oś 1 / oś 2) ---
+win(F.N1, 614, 764, 306, 536);                  // okno w szczycie skrzydła
+win(F.N2, 1370, 1450, 20, 230);                 // wąskie okno parteru
+
+// =========================================================================
+//  OTOCZENIE
+// =========================================================================
+CUR = site;
+box(-650, 0, 0, 1, 40, 600, C.paving);          // podjazd
+box(-300, 0, 0, 1, 728, 833, C.paving);         // dojście do wejścia
+// pergola od SE
+box(1700, 2070, 0, 3, 370, 1230, C.paving, pergola);
+for (const z of [370, 786, 1216]) box(2056, 2070, 3, 248, z, z + 14, C.wood, pergola);
+box(2050, 2070, 248, 268, 370, 1230, C.wood, pergola);
+box(1700, 2070, 248, 268, 370, 384, C.wood, pergola);
+box(1700, 2070, 248, 268, 1216, 1230, C.wood, pergola);
+for (let z = 430; z < 1200; z += 60) box(1700, 2050, 252, 266, z, z + 6, C.wood, pergola);
+// opisy stron i kompas
+for (const [t, x, z] of [['NW · wjazd', -420, 320], ['SW · ogród', 900, 1750], ['SE', 2350, 800], ['NE', 900, -450]]) {
+  const s = textSprite(t); s.position.set(x, 60, z); siteLabels.add(s);
+}
+const compass = new THREE.Group();
+const cone = new THREE.Mesh(new THREE.ConeGeometry(40, 120, 3), mat(0xb03a2e));
+cone.rotation.x = -Math.PI / 2; cone.position.z = -60;
+compass.add(cone);
+compass.add(new THREE.Mesh(new THREE.BoxGeometry(14, 4, 160), mat(0x555555)));
+compass.position.set(-500, 4, 1550);
+compass.rotation.y = Math.PI / 4;                // północ = między NW (A) a NE (oś 1)
+siteLabels.add(compass);
+const nLabel = textSprite('N', 140);
+nLabel.position.set(-500 - 170 * Math.SQRT1_2, 50, 1550 - 170 * Math.SQRT1_2);
+siteLabels.add(nLabel);
+
+// =========================================================================
+//  WNĘTRZA
+// =========================================================================
+// Ściana biegnąca wzdłuż osi 'x' (grubość w z: t0..t1) albo 'z' (grubość w x),
+// od s0 do s1, od wysokości yb do top (liczba lub funkcja (x,z)).
+// Otwory: [s0, s1, y0, y1, typ] – typ 'win' (szyba), 'door' (pusty), 'panel' (+kolor).
+function wall(along, t0, t1, s0, s1, yb, top, openings = [], color = C.iwall) {
+  const tm = (t0 + t1) / 2;
+  const topAt = s => typeof top === 'function' ? (along === 'x' ? top(s, tm) : top(tm, s)) : top;
+  const piece = (a, b, y0, tf) => {
+    const n = Math.max(1, Math.ceil((b - a) / 20));
+    const tops = [];
+    for (let k = n; k >= 0; k--) { const s = a + (b - a) * k / n; tops.push([s, Math.max(y0, tf(s))]); }
+    if (tops.every(p => p[1] <= y0 + 0.5)) return;
+    const poly = [[a, y0], [b, y0], ...tops];
+    if (along === 'x') solid(poly, (u, v) => [u, v, t0], (u, v) => [u, v, t1], color);
+    else               solid(poly, (u, v) => [t0, v, u], (u, v) => [t1, v, u], color);
+  };
+  const cuts = new Set([s0, s1]);
+  for (const o of openings) { cuts.add(Math.max(s0, Math.min(s1, o[0]))); cuts.add(Math.max(s0, Math.min(s1, o[1]))); }
+  const xs = [...cuts].sort((a, b) => a - b);
+  for (let i = 0; i < xs.length - 1; i++) {
+    const a = xs[i], b = xs[i + 1];
+    if (b - a < 0.5) continue;
+    const mid = (a + b) / 2;
+    const o = openings.find(o => mid > o[0] && mid < o[1]);
+    if (!o) { piece(a, b, yb, topAt); continue; }
+    if (o[2] > yb) piece(a, b, yb, () => o[2]);
+    piece(a, b, o[3], topAt);
+    const yTop = Math.min(o[3], topAt(mid));
+    if (o[4] === 'win' || o[4] === 'panel') {
+      const col = o[4] === 'win' ? C.glass : o[5];
+      const op  = o[4] === 'win' ? 0.4 : 1;
+      if (along === 'x') box(a, b, o[2], yTop, tm - 2, tm + 2, col, CUR, op);
+      else               box(tm - 2, tm + 2, o[2], yTop, a, b, col, CUR, op);
+    }
+  }
+}
+function roomLabel(group, text, x, y, z) {
+  const s = textSprite(text, 210); s.position.set(x, y, z); group.add(s);
+}
+
+// ---------------- PARTER (±0.00, ściany do +2.72) ----------------
+CUR = gf;
+const H0 = 272, HS = 240;                        // wysokość parteru / części parterowej (garaż przy osi A)
+const stripH = (x) => x < 380 ? HS : H0;
+// posadzka
+solid([[0, 0], [1032, 0], [1032, 370], [1700, 370], [1700, 1230], [380, 1230], [380, 640], [0, 640]],
+      (u, v) => [u, -12, v], (u, v) => [u, 0, v], C.floor);
+box(40, 690, 0, 1, 40, 618, C.garage);          // garaż
+box(705, 1000, 0, 1, 590, 728, C.tile);          // łazienka
+box(0, 379, 0, 2, 640, 1060, C.paving);          // zadaszone wejście
+lamellas();
+
+// ściany zewnętrzne (gr. 40)
+wall('x', 0, 40, 0, 1032, 0, (x) => stripH(x), [], C.wall);                               // oś 1
+wall('z', 0, 40, 0, 640, 0, HS, [[70, 570, 0, 225, 'panel', C.door]], C.wall);            // A – brama
+wall('z', 992, 1032, 0, 410, 0, H0, [], C.wall);                                           // skrzydło od SE
+wall('x', 370, 410, 992, 1700, 0, H0, [[1370, 1450, 20, 230, 'win']], C.wall);             // oś 2
+wall('z', 1660, 1700, 370, 1230, 0, H0, [[508, 728, 0, 230, 'win'], [846, 1146, 0, 230, 'win']], C.wall); // G
+wall('x', 1190, 1230, 380, 1700, 0, H0, [[420, 700, 90, 230, 'win'], [791, 1171, 0, 230, 'win']], C.wall); // oś 6
+wall('z', 380, 420, 618, 1230, 0, H0, [[728, 833, 0, 210, 'panel', C.frame], [1000, 1160, 90, 230, 'win']], C.wall); // B – wejście
+wall('x', 618, 640, 0, 695, 0, (x) => stripH(x), [[430, 510, 0, 200, 'door']]);          // garaż | wejście, wiatrołap
+// ściany działowe
+wall('z', 690, 705, 40, 855, 0, H0, [[220, 310, 0, 210, 'door'], [420, 500, 0, 200, 'door'], [755, 835, 0, 200, 'door']]);
+wall('x', 370, 395, 690, 992, 0, H0);                                                      // 1/10 | 1/08
+wall('x', 578, 590, 705, 1000, 0, H0);                                                     // 1/08 | 1/07
+wall('x', 728, 740, 705, 1000, 0, H0, [[840, 920, 0, 200, 'door']]);                       // 1/07 | korytarz
+wall('z', 1000, 1012, 395, 754, 0, H0);                                                    // łazienka | schody
+wall('z', 1210, 1225, 410, 754, 0, H0);                                                    // schody | 1/05
+wall('x', 742, 754, 1000, 1210, 0, H0, [[1112, 1210, 0, H0, 'door'], [1025, 1095, 0, 200, 'door']]); // wejście na schody, spiżarka
+wall('x', 742, 754, 1210, 1660, 0, H0, [[1270, 1350, 0, 200, 'door']]);                    // 1/05 | korytarz
+wall('x', 840, 855, 420, 790, 0, H0);                                                      // kuchnia | wiatrołap, korytarz
+wall('z', 1100, 1112, 508, 742, 0, 306);                                                   // ścianka między biegami
+
+// schody dwubiegowe: 10 stopni do spocznika +1.80, potem 7 stopni do +3.06 (18 × 26 cm)
+for (let k = 1; k <= 9; k++) box(1112, 1210, 0, 18 * k, 742 - 26 * k, 742 - 26 * (k - 1), C.stair);
+box(1012, 1210, 150, 180, 410, 508, C.stair);                                              // spocznik
+for (let k = 1; k <= 6; k++) box(1012, 1100, 180 + 18 * k - 30, 180 + 18 * k, 508 + 26 * (k - 1), 508 + 26 * k, C.stair);
+
+for (const [x, z, w, d] of CHIMNEYS) box(x - w / 2, x + w / 2, 0, H0, z - d / 2, z + d / 2, C.chimney);
+
+roomLabel(gfLabels, 'Garaż', 340, 120, 330);
+roomLabel(gfLabels, 'Pom. gosp.', 850, 120, 200);
+roomLabel(gfLabels, 'Pom. gosp.', 850, 120, 485);
+roomLabel(gfLabels, 'Łazienka', 850, 120, 660);
+roomLabel(gfLabels, 'Wiatrołap', 550, 120, 740);
+roomLabel(gfLabels, 'Kuchnia', 600, 120, 1030);
+roomLabel(gfLabels, 'Korytarz', 950, 120, 798);
+roomLabel(gfLabels, 'Schody', 1110, 230, 560);
+roomLabel(gfLabels, 'Pokój', 1440, 120, 576);
+roomLabel(gfLabels, 'Salon', 1440, 120, 1000);
+roomLabel(gfLabels, 'Jadalnia', 1000, 120, 1030);
+roomLabel(gfLabels, 'Wejście', 190, 120, 850);
+
+// ---------------- PODDASZE (+3.06, ściany do sufitu +5.74 lub do połaci) ----------------
+CUR = af;
+// strop z otworem na schody i otwartą przestrzenią nad jadalnią
+solid([[380, 0], [1032, 0], [1032, 370], [1700, 370], [1700, 1230], [380, 1230]],
+      (u, v) => [u, H0, v], (u, v) => [u, 306, v], C.floor, af, 1,
+      [[[1012, 410], [1210, 410], [1210, 725], [1112, 725], [1112, 664], [1012, 664]],
+       [[801, 947], [1203, 947], [1203, 1190], [801, 1190]]]);
+box(1215, 1469, 306, 307, 410, 725, C.tile);     // łazienka
+// taras na dachu garażu
+box(0, 379, HS, 295, 0, 1060, C.slab);
+box(0, 4, 295, 400, 0, 1060, C.rail, af, 0.5);
+box(0, 379, 295, 400, 0, 4, C.rail, af, 0.5);
+box(0, 379, 295, 400, 1056, 1060, C.rail, af, 0.5);
+
+// ściany zewnętrzne poddasza: szczyty i ścianki kolankowe
+wall('z', 380, 420, 370, 1230, 306, atticTop, [[535, 685, 306, 526, 'win'], [852, 1002, 306, 526, 'win']], C.wall); // B
+wall('z', 1660, 1700, 370, 1230, 306, atticTop, [[590, 680, 306, 536, 'win'], [790, 884, 306, 536, 'win'], [896, 1040, 306, 536, 'win']], C.wall); // G
+wall('x', 370, 410, 1032, 1700, 306, atticTop, [], C.wall);                                // ścianka kolankowa od NE
+wall('x', 1190, 1230, 380, 1700, 306, atticTop, [[840, 1188, 306, 999, 'door']], C.wall);  // ścianka kolankowa od SW
+wall('x', 0, 40, 380, 1032, 306, atticTop, [[614, 764, 306, 536, 'win']], C.wall);         // szczyt skrzydła
+wall('z', 380, 420, 0, 370, 306, atticTop, [], C.wall);
+wall('z', 992, 1032, 0, 370, 306, atticTop, [], C.wall);
+solid([[840, 310], [1188, 310], [1188, 450], [1040, 574], [988, 574], [840, 450]],         // przeszklenie w szczycie
+      (u, v) => [u, v, 1208], (u, v) => [u, v, 1212], C.glass, af, 0.4);
+
+// ściany działowe poddasza
+wall('x', 370, 395, 420, 992, 306, atticTop, [[595, 675, 306, 506, 'door']]);              // 2/08 | 2/03
+wall('z', 789, 801, 395, 716, 306, atticTop);                                              // 2/03 | 2/04
+wall('z', 789, 801, 812, 1190, 306, atticTop);                                             // 2/02 | antresola
+wall('x', 716, 728, 420, 801, 306, atticTop, [[710, 785, 306, 506, 'door']]);              // 2/03 | hol
+wall('x', 800, 812, 420, 801, 306, atticTop, [[710, 785, 306, 506, 'door']]);              // hol | 2/02
+wall('z', 690, 700, 728, 800, 306, atticTop);                                              // szacht wentylacyjny
+wall('x', 716, 728, 801, 1000, 306, atticTop, [[860, 940, 306, 506, 'door']]);             // 2/04 | korytarz
+wall('z', 1000, 1012, 395, 716, 306, atticTop);                                            // 2/04 | schody
+wall('z', 1203, 1215, 410, 737, 306, atticTop);                                            // schody | 2/05
+wall('z', 1203, 1215, 884, 1190, 306, atticTop);                                           // antresola | 2/07
+wall('x', 725, 737, 1112, 1215, 306, atticTop);                                            // obudowa biegu
+wall('x', 725, 737, 1215, 1481, 306, atticTop, [[1330, 1410, 306, 506, 'door']]);          // 2/05 | korytarz
+wall('z', 1469, 1481, 410, 737, 306, atticTop);                                            // 2/05 | 2/06
+wall('x', 690, 702, 1481, 1660, 306, atticTop, [[1500, 1570, 306, 506, 'door']]);          // 2/06 | korytarz
+wall('x', 884, 896, 1215, 1660, 306, atticTop, [[1300, 1380, 306, 506, 'door']]);         // korytarz | 2/07
+box(801, 1203, 306, 406, 946, 950, C.rail, af, 0.5);                                       // balustrada antresoli
+box(1110, 1114, 306, 406, 664, 725, C.rail, af, 0.5);                                      // balustrada przy schodach
+
+for (const [x, z, w, d] of CHIMNEYS) box(x - w / 2, x + w / 2, 306, CEIL, z - d / 2, z + d / 2, C.chimney);
+
+roomLabel(afLabels, 'Pokój', 700, 450, 200);
+roomLabel(afLabels, 'Pokój', 600, 450, 560);
+roomLabel(afLabels, 'Pokój', 600, 450, 1010);
+roomLabel(afLabels, 'Pom. gosp.', 900, 450, 555);
+roomLabel(afLabels, 'Korytarz', 1000, 450, 840);
+roomLabel(afLabels, 'Łazienka', 1340, 450, 570);
+roomLabel(afLabels, 'Garderoba', 1570, 450, 545);
+roomLabel(afLabels, 'Pokój', 1440, 450, 1045);
+roomLabel(afLabels, 'Nad jadalnią', 1000, 380, 1070);
+roomLabel(afLabels, 'Taras', 190, 350, 520);
+
+// =========================================================================
+//  MEBLE (proste bryły, do włączania/wyłączania)
+// =========================================================================
+const gfFurn = new THREE.Group(), afFurn = new THREE.Group();
+root.add(gfFurn, afFurn);
+const M = { wood: 0xb48c5e, dark: 0x6b6f73, linen: 0xefebe3, fabric: 0x8a96a3, cab: 0xe3e1dc,
+            top: 0x5d5f62, appl: 0xd5d8db, white: 0xfbfbfb, car: 0x7f93a8, carTop: 0x55606b,
+            tv: 0x2e3033, rug: 0xc9b9a0, water: 0xd3e4ec };
+
+function legs4(x0, x1, z0, z1, y0, y1, t = 5) {
+  for (const [a, b] of [[x0, z0], [x1 - t, z0], [x0, z1 - t], [x1 - t, z1 - t]]) box(a, a + t, y0, y1, b, b + t, M.dark);
+}
+function table(x0, x1, z0, z1, y, h = 75, col = M.wood) {
+  box(x0, x1, y + h - 4, y + h, z0, z1, col);
+  legs4(x0 + 3, x1 - 3, z0 + 3, z1 - 3, y, y + h - 4);
+}
+// back: strona oparcia ('x-', 'x+', 'z-', 'z+')
+function chair(cx, cz, y, back) {
+  const s = 22, t = 4;
+  box(cx - s, cx + s, y + 42, y + 47, cz - s, cz + s, M.dark);
+  legs4(cx - s + 2, cx + s - 2, cz - s + 2, cz + s - 2, y, y + 42, 4);
+  if (back === 'x-') box(cx - s, cx - s + t, y + 47, y + 90, cz - s, cz + s, M.dark);
+  if (back === 'x+') box(cx + s - t, cx + s, y + 47, y + 90, cz - s, cz + s, M.dark);
+  if (back === 'z-') box(cx - s, cx + s, y + 47, y + 90, cz - s, cz - s + t, M.dark);
+  if (back === 'z+') box(cx - s, cx + s, y + 47, y + 90, cz + s - t, cz + s, M.dark);
+}
+// head: strona wezgłowia
+function bed(x0, x1, z0, z1, y, head) {
+  box(x0, x1, y, y + 30, z0, z1, M.wood);
+  box(x0 + 3, x1 - 3, y + 30, y + 52, z0 + 3, z1 - 3, M.linen);
+  const t = 6, H = y + 100, p0 = y + 52, p1 = y + 63;
+  if (head === 'x-') { box(x0 - t, x0, y, H, z0, z1, M.wood); box(x0 + 8, x0 + 48, p0, p1, z0 + 10, z1 - 10, M.white); }
+  if (head === 'x+') { box(x1, x1 + t, y, H, z0, z1, M.wood); box(x1 - 48, x1 - 8, p0, p1, z0 + 10, z1 - 10, M.white); }
+  if (head === 'z-') { box(x0, x1, y, H, z0 - t, z0, M.wood); box(x0 + 10, x1 - 10, p0, p1, z0 + 8, z0 + 48, M.white); }
+  if (head === 'z+') { box(x0, x1, y, H, z1, z1 + t, M.wood); box(x0 + 10, x1 - 10, p0, p1, z1 - 48, z1 - 8, M.white); }
+}
+function sofa(x0, x1, z0, z1, y, back) {
+  box(x0, x1, y, y + 42, z0, z1, M.fabric);
+  const d = 20, a = 15;
+  if (back[0] === 'z') {
+    const zb = back === 'z+' ? [z1 - d, z1] : [z0, z0 + d];
+    box(x0, x1, y + 42, y + 82, zb[0], zb[1], M.fabric);
+    box(x0, x0 + a, y + 42, y + 62, z0, z1, M.fabric); box(x1 - a, x1, y + 42, y + 62, z0, z1, M.fabric);
+  } else {
+    const xb = back === 'x+' ? [x1 - d, x1] : [x0, x0 + d];
+    box(xb[0], xb[1], y + 42, y + 82, z0, z1, M.fabric);
+    box(x0, x1, y + 42, y + 62, z0, z0 + a, M.fabric); box(x0, x1, y + 42, y + 62, z1 - a, z1, M.fabric);
+  }
+}
+function toilet(x0, x1, z0, z1, y, back) {
+  const t = 18;
+  const tk = back === 'x-' ? [x0, x0 + t, z0, z1] : back === 'x+' ? [x1 - t, x1, z0, z1]
+           : back === 'z-' ? [x0, x1, z0, z0 + t] : [x0, x1, z1 - t, z1];
+  box(tk[0], tk[1], y, y + 80, tk[2], tk[3], M.white);
+  box(x0 + (back === 'x-' ? t : 0), x1 - (back === 'x+' ? t : 0), y, y + 40,
+      z0 + (back === 'z-' ? t : 0), z1 - (back === 'z+' ? t : 0), M.white);
+}
+function vanity(x0, x1, z0, z1, y) { box(x0, x1, y, y + 82, z0, z1, M.cab); box(x0, x1, y + 82, y + 86, z0, z1, M.white); }
+function bath(x0, x1, z0, z1, y) { box(x0, x1, y, y + 55, z0, z1, M.white); box(x0 + 8, x1 - 8, y + 50, y + 56, z0 + 8, z1 - 8, M.water); }
+function shower(x0, x1, z0, z1, y, glass) {
+  box(x0, x1, y, y + 5, z0, z1, M.white);
+  for (const g of glass) {
+    if (g === 'x-') box(x0, x0 + 1, y + 5, y + 200, z0, z1, C.rail, CUR, 0.4);
+    if (g === 'x+') box(x1 - 1, x1, y + 5, y + 200, z0, z1, C.rail, CUR, 0.4);
+    if (g === 'z-') box(x0, x1, y + 5, y + 200, z0, z0 + 1, C.rail, CUR, 0.4);
+    if (g === 'z+') box(x0, x1, y + 5, y + 200, z1 - 1, z1, C.rail, CUR, 0.4);
+  }
+}
+function counter(x0, x1, z0, z1, y) { box(x0, x1, y, y + 86, z0, z1, M.cab); box(x0, x1, y + 86, y + 90, z0, z1, M.top); }
+function car(x0, x1, z0, z1) {
+  box(x0, x1, 22, 95, z0, z1, M.car);
+  box(x0 + 110, x1 - 90, 95, 145, z0 + 12, z1 - 12, M.carTop);
+  for (const wx of [x0 + 50, x1 - 120]) for (const wz of [[z0 - 2, z0 + 24], [z1 - 24, z1 + 2]])
+    box(wx, wx + 70, 0, 62, wz[0], wz[1], M.tv);
+}
+
+// ---------------- meble parteru ----------------
+CUR = gfFurn;
+car(110, 560, 100, 280);                          // garaż
+car(110, 560, 370, 550);
+box(715, 980, 0, 200, 45, 95, M.cab);             // 1/10 – regały
+box(925, 985, 0, 180, 300, 360, M.appl);          // 1/10 – kocioł
+box(930, 990, 0, 85, 400, 460, M.appl);           // 1/08 – pralka i suszarka
+box(930, 990, 85, 170, 400, 460, M.appl);
+counter(800, 925, 400, 460, 0);
+shower(900, 995, 595, 690, 0, ['x-', 'z+']);      // 1/07 – łazienka
+vanity(710, 800, 595, 645, 0);
+toilet(710, 770, 670, 708, 0, 'x-');
+box(530, 690, 0, 230, 645, 705, M.cab);           // wiatrołap – szafa
+box(430, 495, 0, 210, 860, 920, M.appl);          // kuchnia – lodówka
+counter(495, 787, 860, 920, 0);
+box(495, 787, 150, 220, 860, 895, M.cab);         // szafki górne
+box(600, 660, 90, 91, 865, 915, M.tv);            // płyta grzewcza
+counter(430, 720, 1130, 1185, 0);                 // blat pod oknem
+box(540, 600, 90, 91, 1140, 1175, M.appl);        // zlew
+table(910, 1090, 965, 1075, 0);                   // jadalnia – stół i 6 krzeseł
+for (const x of [940, 1000, 1060]) { chair(x, 940, 0, 'z-'); chair(x, 1100, 0, 'z+'); }
+box(1320, 1560, 0, 1.5, 940, 1080, M.rug);        // salon
+sofa(1300, 1580, 1100, 1185, 0, 'z+');
+table(1390, 1490, 980, 1040, 0, 40);
+sofa(1240, 1320, 960, 1050, 0, 'x-');
+box(1360, 1540, 0, 50, 762, 805, M.cab);          // szafka RTV i telewizor
+box(1390, 1510, 60, 130, 788, 793, M.tv);
+bed(1470, 1630, 416, 616, 0, 'z-');               // 1/05 – pokój
+box(1420, 1462, 0, 50, 416, 456, M.wood);
+box(1231, 1291, 0, 220, 420, 700, M.cab);
+
+// ---------------- meble poddasza ----------------
+CUR = afFurn;
+const Y1 = 306;
+bed(720, 880, 160, 362, Y1, 'z+');                // 2/08
+box(675, 715, Y1, Y1 + 50, 320, 360, M.wood);
+box(885, 925, Y1, Y1 + 50, 320, 360, M.wood);
+table(620, 760, 48, 108, Y1);
+chair(690, 135, Y1, 'z+');
+bed(430, 630, 420, 510, Y1, 'x-');                // 2/03
+table(560, 680, 655, 712, Y1);
+chair(620, 630, Y1, 'z-');
+box(700, 785, Y1, Y1 + 200, 560, 620, M.cab);
+bed(520, 660, 990, 1184, Y1, 'z+');               // 2/02
+table(640, 760, 822, 880, Y1);
+chair(700, 905, Y1, 'z+');
+box(430, 480, Y1, Y1 + 80, 1060, 1170, M.cab);
+box(810, 860, Y1, Y1 + 180, 480, 700, M.cab);     // 2/04 – regały
+bath(1222, 1297, 420, 590, Y1);                   // 2/05 – łazienka
+vanity(1414, 1464, 450, 620, Y1);
+toilet(1330, 1368, 416, 476, Y1, 'z-');
+shower(1222, 1312, 630, 720, Y1, ['x+', 'z-']);
+box(1490, 1545, Y1, Y1 + 200, 500, 680, M.cab);   // 2/06 – garderoba
+box(1555, 1655, Y1, Y1 + 80, 418, 470, M.cab);
+bed(1450, 1650, 950, 1110, Y1, 'x+');             // 2/07
+box(1610, 1650, Y1, Y1 + 50, 905, 945, M.wood);
+box(1610, 1650, Y1, Y1 + 50, 1115, 1155, M.wood);
+box(1225, 1285, Y1, Y1 + 210, 905, 1080, M.cab);
+table(120, 200, 420, 500, 295, 72);               // taras na garażu
+chair(160, 395, 295, 'z-');
+chair(160, 525, 295, 'z+');
+
+// =========================================================================
+//  INTERFEJS
+// =========================================================================
+const target = new THREE.Vector3(0, 2.6, 0);
+const views = [
+  ['3D',              [-17, 11, 19]],
+  ['NW – wjazd',      [-25, 4, 0]],
+  ['SW – ogród',      [0, 4, 25]],
+  ['SE',              [25, 4, 0]],
+  ['NE',              [0, 4, -25]],
+  ['Z góry',          [0, 34, 0.01]],
+];
+let goal = null;
+const flyTo = p => { goal = new THREE.Vector3(...p); controls.target.copy(target); };
+const vbox = document.getElementById('views');
+for (const [name, p] of views) {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.onclick = () => flyTo(name === '3D' && mode !== 'ext' ? [-9, 21, 14] : p);
+  vbox.appendChild(b);
+}
+
+let mode = 'ext';
+const modeBtns = {};
+function applyVisibility() {
+  const lab = document.getElementById('tLabels').checked;
+  ext.visible = mode === 'ext';
+  gf.visible  = mode !== 'ext';
+  af.visible  = mode === 'af';
+  siteLabels.visible = lab;
+  gfLabels.visible = lab && mode === 'gf';
+  afLabels.visible = lab && mode === 'af';
+  const furn = document.getElementById('tFurn').checked;
+  gfFurn.visible = furn && mode !== 'ext';
+  afFurn.visible = furn && mode === 'af';
+  for (const k in modeBtns) modeBtns[k].classList.toggle('on', k === mode);
+}
+const mbox = document.getElementById('modes');
+for (const [key, name] of [['ext', 'Z zewnątrz'], ['gf', 'Parter'], ['af', 'Poddasze']]) {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.onclick = () => {
+    const was = mode; mode = key; applyVisibility();
+    if (key !== 'ext' && was === 'ext') flyTo([-9, 21, 14]);
+  };
+  mbox.appendChild(b); modeBtns[key] = b;
+}
+
+camera.position.set(...views[0][1]);
+controls.target.copy(target);
+controls.update();
+applyVisibility();
+
+document.getElementById('tPergola').onchange = e => pergola.visible = e.target.checked;
+document.getElementById('tLabels').onchange  = applyVisibility;
+document.getElementById('tFurn').onchange    = applyVisibility;
+document.getElementById('tEdges').onchange   = e => edgeLines.forEach(l => l.visible = e.target.checked);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+renderer.setAnimationLoop(() => {
+  if (goal) {
+    camera.position.lerp(goal, 0.12);
+    if (camera.position.distanceTo(goal) < 0.05) goal = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

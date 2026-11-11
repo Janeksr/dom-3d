@@ -44,7 +44,7 @@
   <div class="grp">
     <label><input type="checkbox" id="tPergola" checked> pergola</label>
     <label><input type="checkbox" id="tEdges" checked> krawędzie</label>
-    <label><input type="checkbox" id="tLabels" checked> opisy</label>
+    <label><input type="checkbox" id="tLabels"> opisy</label>
     <label><input type="checkbox" id="tFurn" checked> meble</label>
   </div>
   <div class="hint">
@@ -654,10 +654,50 @@ function raceCar(x0, z0, { color, stripe, num }) {
   numberDecal(num, x0 + 205, 58, z1 + 0.5, false);
 }
 
+// --- sportowe sedan-coupé w stylu Skyline R34 GT-R (bez logo), przód w stronę +x ---
+function skylineCar(x0, z0, { color, num }) {
+  const W = 180, z1 = z0 + W, zc = z0 + W / 2;
+  const ext = (poly, za, zb, col) => solid(poly, (u, v) => [x0 + u, v, za], (u, v) => [x0 + u, v, zb], col);
+  const arch = (cx) => { const pts = [[cx - 42, 16], [cx - 42, 30]];
+    for (let a = 160; a >= 20; a -= 20) pts.push([cx + 42 * Math.cos(a * Math.PI / 180), 30 + 42 * Math.sin(a * Math.PI / 180)]);
+    return [...pts, [cx + 42, 30], [cx + 42, 16]]; };
+  const RW = 88, FW = 354;                                       // rozstaw osi 266 cm, silnik z przodu
+  const body = [[0, 24], [20, 16], ...arch(RW), ...arch(FW), [440, 16], [462, 30], [462, 62],
+                [452, 80], [420, 88], [300, 99], [100, 101], [6, 97], [0, 72]];
+  const cabin = [[100, 100], [305, 99], [255, 135], [160, 133]];   // kabina z wyraźnym bagażnikiem
+  const roof  = [[158, 132], [256, 134], [258, 137.5], [158, 135.5]];
+  ext(body, z0, z1, color);
+  ext(cabin, z0 + 22, z1 - 22, M.carGlass);
+  ext(roof, z0 + 20, z1 - 20, color);
+  // skrzydło na klapie bagażnika
+  box(x0 + 12, x0 + 20, 97, 118, z0 + 30, z0 + 36, M.carbon);
+  box(x0 + 12, x0 + 20, 97, 118, z1 - 36, z1 - 30, M.carbon);
+  ext([[-2, 117], [40, 118], [40, 122], [0, 123]], z0 + 8, z1 - 8, M.carbon);
+  box(x0 - 4, x0 + 42, 108, 126, z0 + 5, z0 + 8, M.carbon);
+  box(x0 - 4, x0 + 42, 108, 126, z1 - 8, z1 - 5, M.carbon);
+  // cztery okrągłe tylne światła
+  for (const dz of [-62, -32, 32, 62]) cyl(9, 4, 16, M.tail, x0 - 1, 80, zc + dz, [0, 0, Math.PI / 2]);
+  // wąskie przednie reflektory, dolna warga, progi
+  box(x0 + 453, x0 + 463, 64, 74, z0 + 14, z0 + 58, M.lamp);
+  box(x0 + 453, x0 + 463, 64, 74, z1 - 58, z1 - 14, M.lamp);
+  box(x0 + 448, x0 + 472, 12, 16, z0 + 8, z1 - 8, M.carbon);
+  box(x0 + 132, x0 + 310, 13, 19, z0 - 2, z0 + 2, M.carbon);
+  box(x0 + 132, x0 + 310, 13, 19, z1 - 2, z1 + 2, M.carbon);
+  box(x0 - 3, x0 + 26, 14, 24, z0 + 22, z1 - 22, M.carbon);      // dyfuzor
+  box(x0 + 288, x0 + 304, 98, 107, z0 - 7, z0 + 2, color);       // lusterka
+  box(x0 + 288, x0 + 304, 98, 107, z1 - 2, z1 + 7, color);
+  for (const x of [RW, FW]) for (const z of [z0 + 17, z1 - 17]) {
+    cyl(34, 30, 24, M.tire, x0 + x, 34, z, [Math.PI / 2, 0, 0]);
+    cyl(22, 32, 12, M.rim, x0 + x, 34, z, [Math.PI / 2, 0, 0]);
+  }
+  numberDecal(num, x0 + 220, 60, z0 - 0.5, true);
+  numberDecal(num, x0 + 220, 60, z1 + 0.5, false);
+}
+
 // ---------------- meble parteru ----------------
 CUR = gfFurn;
-raceCar(140, 95,  { color: 0xc8102e, num: '7' });                     // garaż – czerwone coupé
-raceCar(140, 375, { color: 0xf1f1ef, stripe: 0x1f4fa3, num: '23' });  // białe z niebieskimi pasami
+raceCar(140, 95,      { color: 0xe8609f, num: '7' });   // garaż – różowe coupé
+skylineCar(140, 380,  { color: 0x1f5fbf, num: '23' });  // niebieskie w stylu Skyline
 box(715, 980, 0, 200, 45, 95, M.cab);             // 1/10 – regały
 box(925, 985, 0, 180, 300, 360, M.appl);          // 1/10 – kocioł
 box(930, 990, 0, 85, 400, 460, M.appl);           // 1/08 – pralka i suszarka

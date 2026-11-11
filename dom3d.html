@@ -27,6 +27,18 @@
                             background: rgba(255,255,255,.93); border: none; border-radius: 8px;
                             box-shadow: 0 1px 4px rgba(0,0,0,.18); }
   #ui.collapsed #uiToggle:hover { background: #e6edf4; }
+  #envBtn { position: absolute; top: 12px; right: 12px; width: 42px; height: 42px; padding: 0; border: none;
+            border-radius: 8px; background: rgba(255,255,255,.93); box-shadow: 0 1px 4px rgba(0,0,0,.18);
+            display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  #envBtn:hover { background: #e6edf4; }
+  #envPanel { position: absolute; top: 62px; right: 12px; background: rgba(255,255,255,.93); padding: 8px 10px;
+              border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.18); font-size: 13px; color: #222; display: none; }
+  #envPanel.open { display: block; }
+  #envPanel .cap { font-size: 11px; color: #666; margin-bottom: 4px; }
+  #envPanel button { display: block; width: 100%; margin: 3px 0; padding: 5px 12px; font-size: 12px; text-align: left;
+                     border: 1px solid #bbb; background: #f7f7f7; border-radius: 4px; cursor: pointer; }
+  #envPanel button:hover { background: #e6edf4; }
+  #envPanel button.on { background: #2f6db3; border-color: #2f6db3; color: #fff; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -56,6 +68,19 @@
     Ściany poddasza ucięte na wysokości sufitu (+5,74). Meble widać w trybach „Parter” i „Poddasze”.
   </div>
   </div>
+</div>
+
+<button id="envBtn" title="Pora dnia" aria-label="Pora dnia" aria-expanded="false">
+  <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true" fill="none" stroke="#222" stroke-width="2" stroke-linecap="round">
+    <circle cx="11" cy="11" r="4"/>
+    <path d="M11 1.5v2.5M11 18v2.5M1.5 11h2.5M18 11h2.5M4.3 4.3l1.8 1.8M15.9 15.9l1.8 1.8M4.3 17.7l1.8-1.8M15.9 6.1l1.8-1.8"/>
+  </svg>
+</button>
+<div id="envPanel">
+  <div class="cap">Pora dnia</div>
+  <button data-env="std">Standardowy</button>
+  <button data-env="day">Dzień</button>
+  <button data-env="night">Noc</button>
 </div>
 
 <script type="module">
@@ -106,7 +131,8 @@ controls.maxPolarAngle = Math.PI / 2 - 0.02;
 controls.minDistance = 3;
 controls.maxDistance = 90;
 
-scene.add(new THREE.AmbientLight(0xffffff, 1.3));
+const amb = new THREE.AmbientLight(0xffffff, 1.3);
+scene.add(amb);
 const sun = new THREE.DirectionalLight(0xffffff, 2.0);
 sun.position.set(-20, 30, 25);
 scene.add(sun);
@@ -114,7 +140,7 @@ const fill = new THREE.DirectionalLight(0xffffff, 0.6);
 fill.position.set(20, 10, -25);
 scene.add(fill);
 
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.MeshLambertMaterial({ color: C.ground }));
+const ground = new THREE.Mesh(new THREE.CircleGeometry(400, 64), new THREE.MeshLambertMaterial({ color: C.ground }));
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.02;
 scene.add(ground);
@@ -784,6 +810,140 @@ chair(160, 395, 295, 'z-');
 chair(160, 525, 295, 'z+');
 
 // =========================================================================
+//  PORA DNIA: STANDARDOWY / DZIEŃ / NOC
+// =========================================================================
+const SUN_DIR  = new THREE.Vector3(-0.33, 0.26, 0.91).normalize();   // nisko, od zachodu-płd. zachodu
+const MOON_DIR = new THREE.Vector3(0.30, 0.32, 0.90).normalize();
+const rand = (() => { let s = 12345; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; })();
+
+function skyDome(top, horizon, below) {
+  const g = new THREE.SphereGeometry(300, 32, 16);
+  const cT = new THREE.Color(top), cH = new THREE.Color(horizon), cB = new THREE.Color(below), c = new THREE.Color();
+  const p = g.attributes.position, cols = [];
+  for (let i = 0; i < p.count; i++) {
+    const t = p.getY(i) / 300;
+    if (t >= 0) c.copy(cH).lerp(cT, Math.pow(t, 0.6)); else c.copy(cB);
+    cols.push(c.r, c.g, c.b);
+  }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, depthWrite: false }));
+  m.renderOrder = -1;
+  return m;
+}
+function discSprite(draw, scale) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+  draw(cv.getContext('2d'));
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false, transparent: true }));
+  s.scale.set(scale, scale, 1);
+  return s;
+}
+function glow(ctx, rgb, a) {
+  const gr = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  gr.addColorStop(0, `rgba(${rgb},${a})`); gr.addColorStop(0.25, `rgba(${rgb},${a * 0.6})`); gr.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, 256, 256);
+}
+
+// --- dzień: niebo, słońce, chmury ---
+const daySky = new THREE.Group(); daySky.visible = false; scene.add(daySky);
+daySky.add(skyDome(0x4f95db, 0xd7ebf8, 0x9fb98a));
+const sunSprite = discSprite(ctx => {
+  glow(ctx, '255,232,160', 0.75);
+  ctx.fillStyle = '#fff7da'; ctx.beginPath(); ctx.arc(128, 128, 30, 0, Math.PI * 2); ctx.fill();
+}, 46);
+sunSprite.position.copy(SUN_DIR).multiplyScalar(200);
+daySky.add(sunSprite);
+const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+for (const [x, y, z, s] of [[110, 20, -120, 7], [40, 28, -170, 9], [-60, 35, -150, 8], [150, 30, 40, 8],
+                            [-120, 26, 90, 7], [0, 40, 170, 9], [-150, 32, -30, 6], [-70, 24, 160, 6]]) {
+  const cl = new THREE.Group();
+  for (const [dx, dy, dz, r] of [[0, 0, 0, 1], [1.1, -0.15, 0.2, 0.75], [-1.0, -0.2, -0.1, 0.7], [0.4, 0.35, -0.3, 0.65], [-0.4, 0.25, 0.35, 0.6]]) {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(r * s, 12, 8), cloudMat);
+    b.position.set(dx * s, dy * s * 0.6, dz * s); b.scale.y = 0.6; cl.add(b);
+  }
+  cl.position.set(x, y, z); daySky.add(cl);
+}
+
+// --- noc: niebo, gwiazdy, księżyc ---
+const nightSky = new THREE.Group(); nightSky.visible = false; scene.add(nightSky);
+nightSky.add(skyDome(0x03050c, 0x1b2645, 0x0d140d));
+for (const [n, size] of [[1400, 1.3], [180, 2.4]]) {
+  const pos = [], col = [];
+  for (let i = 0; i < n; i++) {
+    const y = 0.05 + rand() * 0.95, r = Math.sqrt(1 - y * y), th = rand() * Math.PI * 2, b = 0.45 + rand() * 0.55;
+    pos.push(r * Math.cos(th) * 280, y * 280, r * Math.sin(th) * 280);
+    col.push(b, b, b * (0.9 + rand() * 0.2));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  nightSky.add(new THREE.Points(g, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, depthWrite: false })));
+}
+const moonSprite = discSprite(ctx => {
+  glow(ctx, '190,205,255', 0.35);
+  ctx.fillStyle = '#ecebe2'; ctx.beginPath(); ctx.arc(128, 128, 40, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(170,170,160,0.55)';
+  for (const [x, y, r] of [[114, 116, 9], [142, 136, 7], [126, 148, 5], [146, 110, 4], [108, 140, 4]]) {
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+}, 30);
+moonSprite.position.copy(MOON_DIR).multiplyScalar(200);
+nightSky.add(moonSprite);
+
+// --- światła domu (włączane nocą) ---
+const lampMat = new THREE.MeshLambertMaterial({ color: 0xe8e2d0 });
+const outLights = [], gfLights = [], afLights = [];
+function pointLight(list, x, y, z) {
+  const L = new THREE.PointLight(0xffc27a, list === outLights ? 7 : 5, 0, 2);
+  L.position.set(x, y, z); L.visible = false; root.add(L); list.push(L);
+}
+function lampFixture(x0, x1, y0, y1, z0, z1) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), lampMat);
+  m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); root.add(m);
+}
+lampFixture(372, 380, 195, 215, 850, 862); pointLight(outLights, 330, 200, 790);    // wejście
+lampFixture(-6, 0, 232, 242, 300, 340);    pointLight(outLights, -50, 238, 320);    // nad bramą garażu
+lampFixture(765, 777, 200, 215, 1230, 1236); pointLight(outLights, 771, 205, 1290); // przy drzwiach tarasowych
+lampFixture(1200, 1212, 200, 215, 1230, 1236); pointLight(outLights, 1206, 205, 1290);
+lampFixture(1880, 1900, 228, 246, 790, 810); pointLight(outLights, 1890, 222, 800); // pod pergolą
+for (const [x, z] of [[1440, 980], [1000, 1010], [600, 1020], [1440, 576], [800, 790], [850, 560], [360, 330]])
+  pointLight(gfLights, x, 240, z);
+for (const [x, z] of [[700, 200], [600, 560], [600, 1000], [1440, 1040], [1340, 570], [1000, 840]])
+  pointLight(afLights, x, 500, z);
+
+const glassMats = [mat(C.glass), mat(C.glass, 0.4)];
+let env = 'std';
+function updateNightLights() {
+  const night = env === 'night';
+  outLights.forEach(L => L.visible = night);
+  gfLights.forEach(L => L.visible = night && mode !== 'ext');
+  afLights.forEach(L => L.visible = night && mode === 'af');
+}
+function applyEnv(e) {
+  env = e;
+  const night = e === 'night', day = e === 'day';
+  daySky.visible = day; nightSky.visible = night;
+  scene.background = new THREE.Color(night ? 0x0b1020 : 0xdfe9f2);
+  if (night) {
+    amb.color.set(0x7080b0); amb.intensity = 0.35;
+    sun.color.set(0xa9b8ff); sun.intensity = 0.55; sun.position.copy(MOON_DIR).multiplyScalar(40);
+    fill.intensity = 0;
+  } else if (day) {
+    amb.color.set(0xf2f6ff); amb.intensity = 1.3;
+    sun.color.set(0xfff1d6); sun.intensity = 2.6; sun.position.copy(SUN_DIR).multiplyScalar(40);
+    fill.intensity = 0.35;
+  } else {
+    amb.color.set(0xffffff); amb.intensity = 1.3;
+    sun.color.set(0xffffff); sun.intensity = 2.0; sun.position.set(-20, 30, 25);
+    fill.intensity = 0.6;
+  }
+  for (const m of glassMats) { m.emissive.set(night ? 0xffc46b : 0x000000); m.emissiveIntensity = m.opacity < 1 ? 0.5 : 0.9; }
+  lampMat.emissive.set(night ? 0xffd28a : 0x000000);
+  updateNightLights();
+  document.querySelectorAll('#envPanel button').forEach(b => b.classList.toggle('on', b.dataset.env === e));
+}
+
+// =========================================================================
 //  INTERFEJS
 // =========================================================================
 const target = new THREE.Vector3(0, 2.6, 0);
@@ -823,6 +983,7 @@ function applyVisibility() {
   const furn = document.getElementById('tFurn').checked;
   gfFurn.visible = furn && mode !== 'ext';
   afFurn.visible = furn && mode === 'af';
+  updateNightLights();
   for (const k in modeBtns) modeBtns[k].classList.toggle('on', k === mode);
 }
 const mbox = document.getElementById('modes');
@@ -840,6 +1001,18 @@ camera.position.copy(fit(views[0][1]));
 controls.target.copy(target);
 controls.update();
 applyVisibility();
+
+// panel pory dnia (prawy górny róg)
+const envBtn = document.getElementById('envBtn'), envPanel = document.getElementById('envPanel');
+envBtn.onclick = () => {
+  const open = !envPanel.classList.contains('open');
+  envPanel.classList.toggle('open', open); envBtn.setAttribute('aria-expanded', open);
+};
+envPanel.querySelectorAll('button').forEach(b => b.onclick = () => {
+  applyEnv(b.dataset.env);
+  envPanel.classList.remove('open'); envBtn.setAttribute('aria-expanded', false);
+});
+applyEnv('std');
 
 // zwijanie panelu (na wąskich ekranach domyślnie zwinięty)
 const uiBox = document.getElementById('ui'), uiToggle = document.getElementById('uiToggle');

@@ -21,9 +21,12 @@
   #ui .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   #ui .head h1 { margin: 0; }
   #ui #uiToggle { margin: 0; padding: 2px 9px; font-size: 13px; line-height: 1.4; }
-  #ui.collapsed { padding: 6px 8px; }
-  #ui.collapsed #uiBody { display: none; }
-  #ui.collapsed h1 { font-size: 13px; }
+  #ui.collapsed { padding: 0; background: none; box-shadow: none; overflow: visible; }
+  #ui.collapsed #uiBody, #ui.collapsed h1 { display: none; }
+  #ui.collapsed #uiToggle { width: 42px; height: 42px; padding: 0; display: flex; align-items: center; justify-content: center;
+                            background: rgba(255,255,255,.93); border: none; border-radius: 8px;
+                            box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+  #ui.collapsed #uiToggle:hover { background: #e6edf4; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -842,8 +845,10 @@ applyVisibility();
 const uiBox = document.getElementById('ui'), uiToggle = document.getElementById('uiToggle');
 function setPanel(open) {
   uiBox.classList.toggle('collapsed', !open);
-  uiToggle.textContent = open ? 'ukryj' : 'menu';
+  uiToggle.innerHTML = open ? 'ukryj'
+    : '<svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M4 6h14M4 11h14M4 16h14" stroke="#222" stroke-width="2.2" stroke-linecap="round"/></svg>';
   uiToggle.setAttribute('aria-expanded', open);
+  uiToggle.setAttribute('aria-label', open ? 'Ukryj menu' : 'Pokaż menu');
 }
 setPanel(window.innerWidth >= 700);
 uiToggle.onclick = () => setPanel(uiBox.classList.contains('collapsed'));

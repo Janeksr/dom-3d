@@ -17,6 +17,13 @@
   #ui button.on { background: #2f6db3; border-color: #2f6db3; color: #fff; }
   #ui label { display: inline-block; margin-right: 10px; cursor: pointer; }
   #ui .hint { color: #666; font-size: 11px; margin-top: 8px; line-height: 1.45; }
+  #ui { max-width: min(280px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+  #ui .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  #ui .head h1 { margin: 0; }
+  #ui #uiToggle { margin: 0; padding: 2px 9px; font-size: 13px; line-height: 1.4; }
+  #ui.collapsed { padding: 6px 8px; }
+  #ui.collapsed #uiBody { display: none; }
+  #ui.collapsed h1 { font-size: 13px; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -27,7 +34,11 @@
 </head>
 <body>
 <div id="ui">
-  <h1>Dom – model 3D</h1>
+  <div class="head">
+    <h1>Dom – model 3D</h1>
+    <button id="uiToggle" title="Ukryj / pokaż panel" aria-expanded="true">ukryj</button>
+  </div>
+  <div id="uiBody">
   <div class="grp"><div class="cap">Co pokazać</div><div id="modes"></div></div>
   <div class="grp"><div class="cap">Widok</div><div id="views"></div></div>
   <div class="grp">
@@ -40,6 +51,7 @@
     Lewy przycisk – obrót · prawy – przesuwanie · kółko – przybliżenie.<br>
     Model uproszczony, odtworzony ze zdjęć rzutów, elewacji i przekrojów (skala 1:100) – dokładność rzędu kilkudziesięciu cm.
     Ściany poddasza ucięte na wysokości sufitu (+5,74). Meble widać w trybach „Parter” i „Poddasze”.
+  </div>
   </div>
 </div>
 
@@ -657,7 +669,12 @@ const views = [
   ['Z góry',          [0, 34, 0.01]],
 ];
 let goal = null;
-const flyTo = p => { goal = new THREE.Vector3(...p); controls.target.copy(target); };
+// na wąskim (pionowym) ekranie kamera odsuwa się, żeby dom mieścił się w kadrze
+const fit = p => {
+  const k = Math.min(2.8, Math.max(1, 1.3 / camera.aspect));
+  return new THREE.Vector3(...p).sub(target).multiplyScalar(k).add(target);
+};
+const flyTo = p => { goal = fit(p); controls.target.copy(target); };
 const vbox = document.getElementById('views');
 for (const [name, p] of views) {
   const b = document.createElement('button');
@@ -692,10 +709,20 @@ for (const [key, name] of [['ext', 'Z zewnątrz'], ['gf', 'Parter'], ['af', 'Pod
   mbox.appendChild(b); modeBtns[key] = b;
 }
 
-camera.position.set(...views[0][1]);
+camera.position.copy(fit(views[0][1]));
 controls.target.copy(target);
 controls.update();
 applyVisibility();
+
+// zwijanie panelu (na wąskich ekranach domyślnie zwinięty)
+const uiBox = document.getElementById('ui'), uiToggle = document.getElementById('uiToggle');
+function setPanel(open) {
+  uiBox.classList.toggle('collapsed', !open);
+  uiToggle.textContent = open ? 'ukryj' : 'menu';
+  uiToggle.setAttribute('aria-expanded', open);
+}
+setPanel(window.innerWidth >= 700);
+uiToggle.onclick = () => setPanel(uiBox.classList.contains('collapsed'));
 
 document.getElementById('tPergola').onchange = e => pergola.visible = e.target.checked;
 document.getElementById('tLabels').onchange  = applyVisibility;
